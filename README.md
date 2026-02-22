@@ -1,8 +1,16 @@
-# Elite Services - AI Lead Generation Assistant
+# N8N Workflows Collection
 
+Two powerful AI-powered automation workflows:
+
+## 1. Elite Services - Lead Generation Assistant
 🤖 **Natural AI-powered chatbot** for capturing and qualifying cleaning service leads across Facebook Messenger, Instagram DMs, and web chat.
 
-## ✨ What This Does
+## 2. Reddit Business Opportunity Finder
+🔍 **AI-powered Reddit scanner** that finds business problems you can solve with software and sends them to you via Telegram.
+
+---
+
+## ✨ Elite Services Features
 
 - **Captures leads** from social media with natural AI conversations
 - **Scores leads** automatically (1-10) based on urgency, size, and value
@@ -11,6 +19,15 @@
 - **Tracks everything** in Supabase + Google Sheets
 - **Books appointments** via Google Calendar
 - **Sounds human** - no mention of "bot" or "AI"
+
+## ✨ Reddit Opportunity Finder Features
+
+- **Scans 4 subreddits** (r/Entrepreneur, r/startups, r/SaaS, r/smallbusiness)
+- **AI analyzes posts** to find real business problems
+- **Sends to Telegram** with problem + solution ideas
+- **Scores opportunities** 1-10 based on market size, urgency, feasibility
+- **Manual trigger** - you run it whenever you want
+- **Google Sheets logging** - track all opportunities found
 
 ## 📊 Implementation Status
 
@@ -40,14 +57,26 @@ Slack/Email  Google Sheets
 
 ## 📁 Files in This Repository
 
+### Elite Services Workflow
 | File | Purpose |
 |------|---------|
 | `elite-services-main.json` | **Main N8N workflow** - Import this into N8N |
 | `schema.sql` | **Supabase database schema** - Run this in Supabase SQL editor |
 | `supabase-functions.sql` | **Helper SQL functions** - Run after schema.sql |
 | `SETUP_GUIDE.md` | **Complete setup instructions** - Read this first! |
-| `.env.example` | **Environment variables template** - Copy and configure |
 | `Elite_services.md` | **Original requirements** - Full specification |
+
+### Reddit Opportunity Finder
+| File | Purpose |
+|------|---------|
+| `reddit-opportunity-finder.json` | **Reddit scanner workflow** - Import into N8N |
+| `REDDIT_SETUP_GUIDE.md` | **Setup instructions** - Create Telegram bot & configure |
+| `TESTING_REDDIT_WORKFLOW.md` | **Testing guide** - 2-week testing plan |
+
+### Shared Files
+| File | Purpose |
+|------|---------|
+| `.env.example` | **Environment variables template** - Configure for both workflows |
 | `README.md` | **This file** - Project overview |
 
 ## 🚀 Quick Start
