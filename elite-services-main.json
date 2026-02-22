@@ -1,1 +1,1351 @@
- 
+{
+  "name": "Elite Services - Lead Generation Assistant",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "facebook-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-facebook",
+      "name": "Facebook Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "elite-fb"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "instagram-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-instagram",
+      "name": "Instagram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 500],
+      "webhookId": "elite-ig"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "web-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-web",
+      "name": "Web Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 700],
+      "webhookId": "elite-web"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize incoming messages from all channels\nconst body = $input.item.json.body || $input.item.json;\nconst webhookPath = $input.item.json.path || '';\n\nlet normalized = {\n  channel: '',\n  sender_id: '',\n  message_text: '',\n  is_staff_reply: false,\n  raw_webhook: body\n};\n\nconst metaPageId = $env.META_PAGE_ID || '';\nconst metaInstagramId = $env.META_INSTAGRAM_ID || '';\n\n// Facebook Messenger\nif (webhookPath.includes('facebook') || body.object === 'page') {\n  normalized.channel = 'facebook_messenger';\n  \n  const messaging = body.entry?.[0]?.messaging?.[0];\n  if (messaging) {\n    normalized.sender_id = messaging.sender?.id || '';\n    normalized.message_text = messaging.message?.text || '';\n    \n    // CRITICAL: Detect if sender is the page itself (staff reply)\n    normalized.is_staff_reply = normalized.sender_id === metaPageId;\n  }\n}\n\n// Instagram\nelse if (webhookPath.includes('instagram') || body.object === 'instagram') {\n  normalized.channel = 'instagram';\n  \n  const messaging = body.entry?.[0]?.messaging?.[0];\n  if (messaging) {\n    normalized.sender_id = messaging.sender?.id || '';\n    normalized.message_text = messaging.message?.text || '';\n    \n    // CRITICAL: Detect if sender is the Instagram business account (staff reply)\n    normalized.is_staff_reply = normalized.sender_id === metaInstagramId;\n  }\n}\n\n// Web\nelse {\n  normalized.channel = 'web';\n  normalized.sender_id = body.user_id || body.session_id || '';\n  normalized.message_text = body.message || body.text || '';\n  normalized.is_staff_reply = false; // Web messages are always from users\n}\n\nreturn normalized;"
+      },
+      "id": "normalize-message",
+      "name": "Normalize Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [550, 500]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/rpc/get_or_create_conversation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "p_sender_id",
+              "value": "={{ $json.sender_id }}"
+            },
+            {
+              "name": "p_channel",
+              "value": "={{ $json.channel }}"
+            },
+            {
+              "name": "p_agent_id",
+              "value": "={{ $env.AGENT_ID }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-create-conversation",
+      "name": "Get/Create Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [850, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "handover-check",
+              "leftValue": "={{ $json.conversation.status }}",
+              "rightValue": "escalated",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-handover",
+      "name": "Check Human Handover",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1150, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "staff-reply-check",
+              "leftValue": "={{ $json.is_staff_reply }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-staff-reply",
+      "name": "Check if Staff Reply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "eq.{{ $json.conversation.id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "escalated"
+            },
+            {
+              "name": "updated_at",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "auto-escalate",
+      "name": "Auto-Escalate to Staff",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1750, 150]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "conversation_id",
+              "value": "={{ $json.conversation.id }}"
+            },
+            {
+              "name": "role",
+              "value": "staff"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.message_text }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $json.channel }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ { \"is_staff_reply\": true, \"timestamp\": $now.toISO() } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "save-staff-message",
+      "name": "Save Staff Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 150]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check if staff message contains resume keywords\nconst messageText = $input.item.json.message_text || '';\nconst isStaffReply = $input.item.json.is_staff_reply || false;\n\nconst resumeKeywords = ['[RESUME]', '[AUTO]', '[AI]', '[BOT]'];\n\nconst shouldResume = isStaffReply && resumeKeywords.some(keyword => \n  messageText.toUpperCase().includes(keyword)\n);\n\nreturn {\n  ...$input.item.json,\n  should_resume: shouldResume\n};"
+      },
+      "id": "check-resume",
+      "name": "Check Resume Keyword",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2350, 150]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "resume-check",
+              "leftValue": "={{ $json.should_resume }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-resume",
+      "name": "If Resume",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2650, 150]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/conversations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "eq.{{ $json.conversation.id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "open"
+            },
+            {
+              "name": "updated_at",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "resume-automation",
+      "name": "Resume Automation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2950, 50]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "conversation_id",
+              "value": "={{ $json.conversation.id }}"
+            },
+            {
+              "name": "role",
+              "value": "user"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.message_text }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $json.channel }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "save-user-message",
+      "name": "Save User Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1750, 450]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "conversation_id",
+              "value": "eq.{{ $json.conversation.id }}"
+            },
+            {
+              "name": "order",
+              "value": "created_at.asc"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-conversation-history",
+      "name": "Get Conversation History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build AI request with conversation history\nconst conversation = $input.first().json.conversation;\nconst flowState = conversation.flow_state || { current_step: 'greeting', collected_data: {} };\nconst messages = $input.all().slice(1); // Skip first item (conversation data)\n\n// Build conversation history\nconst conversationHistory = messages.map(msg => ({\n  role: msg.json.role === 'assistant' ? 'assistant' : 'user',\n  content: msg.json.content\n}));\n\n// Add latest user message\nconversationHistory.push({\n  role: 'user',\n  content: $input.first().json.message_text\n});\n\n// System prompt\nconst systemPrompt = `You are a professional receptionist for Elite Services, a premium London cleaning company.\n\nRULES:\n- NEVER mention \"bot\", \"AI\", or \"automated\" in any response\n- Use UK English, be friendly, professional, and concise\n- Acknowledge information before asking the next question\n- Vary your responses (\"Thanks!\", \"Perfect!\", \"Great!\")\n- If user goes off-topic, politely redirect or offer human handover\n- Always validate London postcodes (format: SW1A 1AA, EC1A 1BB, etc.)\n\nSERVICES WE OFFER:\n1. Office/commercial cleaning\n2. Facilities-management support (multi-site)\n3. End-of-tenancy clean\n4. Airbnb/short-let turnover\n5. Deep clean (one-off)\n\nCURRENT CONVERSATION STATE:\nStep: ${flowState.current_step}\nData collected so far: ${JSON.stringify(flowState.collected_data || {})}\n\nYOUR TASK:\n1. Understand what the user just said\n2. Extract any new information (name, phone, email, service type, postcode, etc.)\n3. Determine the next question to ask or if conversation is complete\n4. Respond naturally\n\nRETURN JSON ONLY (no markdown):\n{\n  \"response_text\": \"your friendly response here\",\n  \"next_step\": \"greeting|service_selection|location|service_details|contact_capture|timing|booking|complete\",\n  \"collected_data\": { \n    // any data extracted from user message\n    \"service_type\": \"office_cleaning\",\n    \"postcode\": \"EC1A 1BB\",\n    \"name\": \"John Smith\",\n    \"phone\": \"+44 7700 900123\",\n    \"email\": \"john@example.com\",\n    // service-specific fields...\n  },\n  \"quick_replies\": [\"Option 1\", \"Option 2\", \"Option 3\"], // optional buttons\n  \"needs_escalation\": false, // true if user asks for human or has complaint\n  \"conversation_complete\": false // true when all info collected\n}\n\nPRIVACY NOTICE (show before asking for contact details):\n\"Before we continue, just so you know - we'll only use your details to contact you about cleaning services. You can read our privacy policy at eliteservices.london/privacy\"`;\n\nconst aiPayload = {\n  model: $env.OPENROUTER_MODEL || 'anthropic/claude-3.5-sonnet',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    ...conversationHistory\n  ],\n  temperature: 0.7,\n  max_tokens: 800\n};\n\nreturn {\n  ...($input.first().json),\n  ai_payload: aiPayload,\n  flow_state: flowState\n};"
+      },
+      "id": "build-ai-request",
+      "name": "Build AI Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2350, 450]
+    },
+    {
+      "parameters": {
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.OPENROUTER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "HTTP-Referer",
+              "value": "https://eliteservices.london"
+            },
+            {
+              "name": "X-Title",
+              "value": "Elite Services Lead Gen"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.ai_payload) }}",
+        "options": {}
+      },
+      "id": "ai-processor",
+      "name": "AI Processor (OpenRouter)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2650, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse AI response\nconst aiResponse = $input.item.json.choices?.[0]?.message?.content || '{}';\n\nlet parsed;\ntry {\n  // Remove markdown code blocks if present\n  const cleaned = aiResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  // Fallback if AI didn't return valid JSON\n  parsed = {\n    response_text: aiResponse,\n    next_step: 'greeting',\n    collected_data: {},\n    quick_replies: [],\n    needs_escalation: false,\n    conversation_complete: false\n  };\n}\n\n// Merge with existing flow state\nconst existingData = $input.item.json.flow_state?.collected_data || {};\nconst updatedData = { ...existingData, ...(parsed.collected_data || {}) };\n\nconst updatedFlowState = {\n  current_step: parsed.next_step || 'greeting',\n  collected_data: updatedData,\n  last_updated: new Date().toISOString()\n};\n\nreturn {\n  ...$input.item.json,\n  ai_response: parsed,\n  updated_flow_state: updatedFlowState,\n  response_text: parsed.response_text,\n  quick_replies: parsed.quick_replies || [],\n  needs_escalation: parsed.needs_escalation || false,\n  conversation_complete: parsed.conversation_complete || false\n};"
+      },
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2950, 450]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "typing-delay",
+      "name": "Typing Delay",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [3250, 450],
+      "webhookId": "typing-delay"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/conversations",
+        "method": "PATCH",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "eq.{{ $json.conversation.id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "flow_state",
+              "value": "={{ JSON.stringify($json.updated_flow_state) }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.conversation_complete ? 'closed' : ($json.needs_escalation ? 'escalated' : 'open') }}"
+            },
+            {
+              "name": "contact_name",
+              "value": "={{ $json.updated_flow_state.collected_data.name || null }}"
+            },
+            {
+              "name": "contact_phone",
+              "value": "={{ $json.updated_flow_state.collected_data.phone || null }}"
+            },
+            {
+              "name": "contact_email",
+              "value": "={{ $json.updated_flow_state.collected_data.email || null }}"
+            },
+            {
+              "name": "updated_at",
+              "value": "={{ $now.toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-conversation",
+      "name": "Update Conversation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3550, 450]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "conversation_id",
+              "value": "={{ $json.conversation.id }}"
+            },
+            {
+              "name": "role",
+              "value": "assistant"
+            },
+            {
+              "name": "content",
+              "value": "={{ $json.response_text }}"
+            },
+            {
+              "name": "channel",
+              "value": "={{ $json.channel }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ { quick_replies: $json.quick_replies } }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "save-assistant-message",
+      "name": "Save Assistant Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3850, 450]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "complete-check",
+              "leftValue": "={{ $json.conversation_complete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-complete",
+      "name": "Check if Complete",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [4150, 450]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Lead scoring algorithm\nconst data = $input.item.json.updated_flow_state?.collected_data || {};\n\nlet score = 5; // Base score\n\n// Urgency scoring\nif (data.urgency === 'within_48h') score += 2;\nelse if (data.urgency === 'within_7days') score += 1;\n\n// Service type scoring\nconst serviceType = data.service_type || '';\n\n// Office/commercial cleaning\nif (serviceType === 'office_cleaning') {\n  if (data.frequency === 'daily' || data.frequency === 'several_times_week') score += 2;\n  if (data.locations >= 4) score += 2;\n  if (data.size === '1000_plus' || data.size === '500_1000') score += 1;\n}\n\n// Facilities management\nif (serviceType === 'fm_support') {\n  if (data.sites >= 4) score += 2;\n  if (data.sites >= 2) score += 1;\n}\n\n// Airbnb\nif (serviceType === 'airbnb') {\n  if (data.checkouts_per_week >= 4) score += 2;\n  else if (data.checkouts_per_week >= 2) score += 1;\n}\n\n// Large properties\nif (data.property_type && (data.property_type.includes('3bed') || data.property_type.includes('house'))) {\n  score += 1;\n}\n\n// Cap at 10\nscore = Math.min(score, 10);\n\nconst isHot = score >= 7;\n\nreturn {\n  ...$input.item.json,\n  lead_score: score,\n  is_hot: isHot\n};"
+      },
+      "id": "calculate-score",
+      "name": "Calculate Lead Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4450, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "organization_id",
+              "value": "={{ $env.ORGANIZATION_ID }}"
+            },
+            {
+              "name": "agent_id",
+              "value": "={{ $env.AGENT_ID }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.updated_flow_state.collected_data.name }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.updated_flow_state.collected_data.phone }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.updated_flow_state.collected_data.email }}"
+            },
+            {
+              "name": "service_type",
+              "value": "={{ $json.updated_flow_state.collected_data.service_type }}"
+            },
+            {
+              "name": "service_data",
+              "value": "={{ JSON.stringify($json.updated_flow_state.collected_data) }}"
+            },
+            {
+              "name": "lead_score",
+              "value": "={{ $json.lead_score }}"
+            },
+            {
+              "name": "is_hot",
+              "value": "={{ $json.is_hot }}"
+            },
+            {
+              "name": "urgency",
+              "value": "={{ $json.updated_flow_state.collected_data.urgency }}"
+            },
+            {
+              "name": "source_channel",
+              "value": "={{ $json.channel }}"
+            },
+            {
+              "name": "status",
+              "value": "new"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-lead",
+      "name": "Create Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4750, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "hot-check",
+              "leftValue": "={{ $json.is_hot }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-hot",
+      "name": "Check if HOT Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [5050, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  text: '🔥 HOT LEAD ALERT - Score: ' + $json.lead_score + '/10',\n  blocks: [\n    {\n      type: 'header',\n      text: {\n        type: 'plain_text',\n        text: '🔥 HOT LEAD - Score: ' + $json.lead_score + '/10'\n      }\n    },\n    {\n      type: 'section',\n      fields: [\n        { type: 'mrkdwn', text: '*Name:*\\n' + ($json.updated_flow_state.collected_data.name || 'N/A') },\n        { type: 'mrkdwn', text: '*Phone:*\\n' + ($json.updated_flow_state.collected_data.phone || 'N/A') },\n        { type: 'mrkdwn', text: '*Email:*\\n' + ($json.updated_flow_state.collected_data.email || 'N/A') },\n        { type: 'mrkdwn', text: '*Service:*\\n' + ($json.updated_flow_state.collected_data.service_type || 'N/A') },\n        { type: 'mrkdwn', text: '*Urgency:*\\n' + ($json.updated_flow_state.collected_data.urgency || 'N/A') },\n        { type: 'mrkdwn', text: '*Channel:*\\n' + $json.channel }\n      ]\n    },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: '*Details:*\\n```' + JSON.stringify($json.updated_flow_state.collected_data, null, 2) + '```'\n      }\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "id": "slack-alert",
+      "name": "Slack HOT Lead Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [5350, 150]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.GMAIL_FROM_EMAIL }}",
+        "toEmail": "={{ $env.ALERT_EMAIL }}",
+        "subject": "🔥 HOT Lead: {{ $json.updated_flow_state.collected_data.service_type }} - Score {{ $json.lead_score }}/10",
+        "emailType": "html",
+        "message": "<h2>🔥 HOT LEAD ALERT</h2>\n<p><strong>Lead Score:</strong> {{ $json.lead_score }}/10</p>\n<hr>\n<h3>Contact Information</h3>\n<ul>\n  <li><strong>Name:</strong> {{ $json.updated_flow_state.collected_data.name }}</li>\n  <li><strong>Phone:</strong> {{ $json.updated_flow_state.collected_data.phone }}</li>\n  <li><strong>Email:</strong> {{ $json.updated_flow_state.collected_data.email }}</li>\n</ul>\n<h3>Service Details</h3>\n<ul>\n  <li><strong>Service Type:</strong> {{ $json.updated_flow_state.collected_data.service_type }}</li>\n  <li><strong>Urgency:</strong> {{ $json.updated_flow_state.collected_data.urgency }}</li>\n  <li><strong>Channel:</strong> {{ $json.channel }}</li>\n</ul>\n<h3>Full Details</h3>\n<pre>{{ JSON.stringify($json.updated_flow_state.collected_data, null, 2) }}</pre>",
+        "options": {}
+      },
+      "id": "email-alert",
+      "name": "Email HOT Lead Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [5350, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-oauth",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $now.toISO() }}",
+            "Name": "={{ $json.updated_flow_state.collected_data.name }}",
+            "Phone": "={{ $json.updated_flow_state.collected_data.phone }}",
+            "Email": "={{ $json.updated_flow_state.collected_data.email }}",
+            "Service Type": "={{ $json.updated_flow_state.collected_data.service_type }}",
+            "Score": "={{ $json.lead_score }}",
+            "HOT": "={{ $json.is_hot ? 'YES' : 'NO' }}",
+            "Urgency": "={{ $json.updated_flow_state.collected_data.urgency }}",
+            "Channel": "={{ $json.channel }}",
+            "Postcode": "={{ $json.updated_flow_state.collected_data.postcode }}",
+            "Details": "={{ JSON.stringify($json.updated_flow_state.collected_data) }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log-to-sheets",
+      "name": "Log to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.4,
+      "position": [5050, 500],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "sheets-oauth",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send response back to user via Meta API\nconst channel = $input.item.json.channel;\nconst senderId = $input.item.json.sender_id;\nconst responseText = $input.item.json.response_text;\nconst quickReplies = $input.item.json.quick_replies || [];\n\nlet apiUrl = '';\nlet payload = {};\n\nif (channel === 'facebook_messenger') {\n  apiUrl = 'https://graph.facebook.com/v18.0/me/messages';\n  payload = {\n    recipient: { id: senderId },\n    message: {\n      text: responseText\n    },\n    messaging_type: 'RESPONSE'\n  };\n  \n  if (quickReplies.length > 0) {\n    payload.message.quick_replies = quickReplies.map(qr => ({\n      content_type: 'text',\n      title: qr,\n      payload: qr\n    }));\n  }\n}\n\nelse if (channel === 'instagram') {\n  apiUrl = 'https://graph.facebook.com/v18.0/me/messages';\n  payload = {\n    recipient: { id: senderId },\n    message: {\n      text: responseText\n    }\n  };\n}\n\nelse {\n  // Web - return in webhook response\n  return {\n    success: true,\n    message: responseText,\n    quick_replies: quickReplies\n  };\n}\n\nreturn {\n  api_url: apiUrl,\n  payload: payload,\n  access_token: $env.META_PAGE_ACCESS_TOKEN\n};"
+      },
+      "id": "build-send-response",
+      "name": "Build Send Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4150, 600]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.api_url }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "={{ $json.access_token }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.payload) }}",
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response to User",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4450, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'success', message: 'Message received' }) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [4750, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'paused', message: 'Conversation handed over to staff' }) }}",
+        "options": {}
+      },
+      "id": "handover-response",
+      "name": "Handover Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1450, 650]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'resumed', message: 'Automation resumed' }) }}",
+        "options": {}
+      },
+      "id": "resume-response",
+      "name": "Resume Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2950, 250]
+    }
+  ],
+  "connections": {
+    "Facebook Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Instagram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Web Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message": {
+      "main": [
+        [
+          {
+            "node": "Get/Create Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get/Create Conversation": {
+      "main": [
+        [
+          {
+            "node": "Check Human Handover",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Human Handover": {
+      "main": [
+        [
+          {
+            "node": "Handover Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check if Staff Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Staff Reply": {
+      "main": [
+        [
+          {
+            "node": "Auto-Escalate to Staff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save User Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auto-Escalate to Staff": {
+      "main": [
+        [
+          {
+            "node": "Save Staff Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Staff Message": {
+      "main": [
+        [
+          {
+            "node": "Check Resume Keyword",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Resume Keyword": {
+      "main": [
+        [
+          {
+            "node": "If Resume",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Resume": {
+      "main": [
+        [
+          {
+            "node": "Resume Automation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handover Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Automation": {
+      "main": [
+        [
+          {
+            "node": "Resume Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save User Message": {
+      "main": [
+        [
+          {
+            "node": "Get Conversation History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conversation History": {
+      "main": [
+        [
+          {
+            "node": "Build AI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Request": {
+      "main": [
+        [
+          {
+            "node": "AI Processor (OpenRouter)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Processor (OpenRouter)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Typing Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Typing Delay": {
+      "main": [
+        [
+          {
+            "node": "Update Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Conversation": {
+      "main": [
+        [
+          {
+            "node": "Save Assistant Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Assistant Message": {
+      "main": [
+        [
+          {
+            "node": "Check if Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Complete": {
+      "main": [
+        [
+          {
+            "node": "Calculate Lead Score",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Lead Score": {
+      "main": [
+        [
+          {
+            "node": "Create Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Lead": {
+      "main": [
+        [
+          {
+            "node": "Check if HOT Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if HOT Lead": {
+      "main": [
+        [
+          {
+            "node": "Slack HOT Lead Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email HOT Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack HOT Lead Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email HOT Lead Alert": {
+      "main": [
+        [
+          {
+            "node": "Log to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Build Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Send Response": {
+      "main": [
+        [
+          {
+            "node": "Send Response to User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response to User": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2024-02-22T00:00:00.000Z",
+  "versionId": "1"
+}
